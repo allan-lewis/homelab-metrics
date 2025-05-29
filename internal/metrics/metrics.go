@@ -63,7 +63,7 @@ func updatePublicIPMetric() {
 }
 
 func getPublicIP() (string, error) {
-	req, err := http.NewRequest("GET", "https://ifconfig.me", nil)
+	req, err := http.NewRequest("GET", "https://icanhazip.com", nil)
 	if err != nil {
 		return "", err
 	}
