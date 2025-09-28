@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -33,7 +34,7 @@ func init() {
 
 	go func() {
 		updatePublicIPMetric()
-		ticker := time.NewTicker(10 * time.Minute)
+		ticker := time.NewTicker(2 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
 			updatePublicIPMetric()
@@ -63,6 +64,8 @@ func updatePublicIPMetric() {
 }
 
 func getPublicIP() (string, error) {
+	log.Println("Getting public IP")
+
 	req, err := http.NewRequest("GET", "https://icanhazip.com", nil)
 	if err != nil {
 		return "", err
@@ -71,10 +74,11 @@ func getPublicIP() (string, error) {
 	req.Header.Set("User-Agent", "curl/7.79.1")
 
 	client := &http.Client{
-		Timeout: 5 * time.Second,
+		Timeout: 10 * time.Second,
 	}
 	resp, err := client.Do(req)
 	if err != nil {
+		log.Println("Error getting public IP")
 		return "", err
 	}
 	defer resp.Body.Close()
@@ -88,6 +92,9 @@ func getPublicIP() (string, error) {
 	if net.ParseIP(ip) == nil {
 		return "", errors.New("invalid IP returned from service")
 	}
+
+	log.Println("Sucessfully retrieved public IP")
+
 	return ip, nil
 }
 
