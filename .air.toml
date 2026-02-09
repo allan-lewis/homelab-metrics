@@ -1,0 +1,22 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  # Build binary
+  cmd = "go build -o ./tmp/main ."
+
+  # Binary path
+  bin = "./tmp/main"
+
+  # Run with fixed dev port
+  full_bin = "PORT=9203 ./tmp/main"
+
+  # Prevent running if build fails
+  stop_on_error = true
+
+  # Watch settings
+  include_ext = ["go", "tpl", "tmpl", "html"]
+  exclude_dir = ["tmp", "vendor", "testdata", ".git"]
+
+  # Small debounce
+  delay = 200

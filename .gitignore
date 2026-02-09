@@ -2,6 +2,7 @@
 /homelab-metrics
 /bin/
 /build/
+/tmp/
 
 # Go test cache (just in case)
 *.test
