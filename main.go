@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/allan-lewis/homelab-metrics/internal/health"
 	"github.com/allan-lewis/homelab-metrics/internal/metrics"
 	"github.com/allan-lewis/homelab-metrics/internal/proxy"
 	"github.com/go-chi/chi/v5"
@@ -12,6 +13,8 @@ import (
 
 func main() {
 	r := chi.NewRouter()
+
+  r.Mount("/healthz", health.Handler())
 
 	forwardURL := os.Getenv("FORWARD_METRICS_URL")
 	if forwardURL != "" {
