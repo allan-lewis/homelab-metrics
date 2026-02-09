@@ -78,7 +78,7 @@ func getPublicIP() (string, error) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Println("Error getting public IP")
+		log.Printf("Error getting public IP from %s: %v", req.URL, err)
 		return "", err
 	}
 	defer resp.Body.Close()
@@ -93,7 +93,7 @@ func getPublicIP() (string, error) {
 		return "", errors.New("invalid IP returned from service")
 	}
 
-	log.Println("Sucessfully retrieved public IP")
+	log.Printf("Successfully retrieved public IP: %s", ip)
 
 	return ip, nil
 }
