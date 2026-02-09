@@ -1,3 +1,8 @@
-*_templ.go
-tmp
-.DS_Store
+# Go build output
+/homelab-metrics
+/bin/
+/build/
+
+# Go test cache (just in case)
+*.test
+

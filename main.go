@@ -22,9 +22,18 @@ func main() {
 		r.Mount("/", metrics.Handler())
 	}
 
-	log.Println("Starting homelab-metrics on :9102")
+	// Default port
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "9102"
+	}
 
-	if err := http.ListenAndServe(":9102", r); err != nil {
+	addr := ":" + port
+
+	log.Printf("Starting homelab-metrics on %s", addr)
+
+	if err := http.ListenAndServe(addr, r); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
+
 }
