@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -28,9 +29,33 @@ var (
 	})
 )
 
+func isNixOSHost() bool {
+	requiredPaths := []string{
+		"/nix/var/nix/profiles",
+		"/nix/var/nix/profiles/system",
+		"/run/current-system",
+		"/run/booted-system",
+	}
+
+	for _, path := range requiredPaths {
+		if _, err := os.Lstat(path); err != nil {
+			return false
+		}
+	}
+
+	return true
+}
+
 func init() {
 	prometheus.MustRegister(publicIPMetric)
 	prometheus.MustRegister(publicIPLastUpdate)
+
+	if isNixOSHost() {
+		prometheus.MustRegister(NewNixOSCollector())
+		log.Println("Registered NixOS metrics collector")
+	} else {
+		log.Println("NixOS system paths not found; skipping NixOS metrics collector")
+	}
 
 	go func() {
 		updatePublicIPMetric()
