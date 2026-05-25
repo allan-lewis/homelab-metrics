@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -144,7 +143,7 @@ func collectNixOSInfo() (*nixOSInfo, error) {
 
 		generation, err := strconv.Atoi(rawGeneration)
 		if err != nil {
-			log.Printf("Ignoring unexpected NixOS system generation link %q: %v", name, err)
+			log.Printf("Ignoring unexpected NixOS generation link %q: %v", name, err)
 			continue
 		}
 
@@ -157,17 +156,17 @@ func collectNixOSInfo() (*nixOSInfo, error) {
 
 	sort.Ints(generations)
 
-	currentPath, err := filepath.EvalSymlinks(currentSystem)
+	currentInfo, err := os.Stat(currentSystem)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve %s: %w", currentSystem, err)
+		return nil, fmt.Errorf("failed to stat %s: %w", currentSystem, err)
 	}
 
-	bootedPath, err := filepath.EvalSymlinks(bootedSystem)
+	bootedInfo, err := os.Stat(bootedSystem)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve %s: %w", bootedSystem, err)
+		return nil, fmt.Errorf("failed to stat %s: %w", bootedSystem, err)
 	}
 
-	bootedIsCurrent := currentPath == bootedPath
+	bootedIsCurrent := os.SameFile(currentInfo, bootedInfo)
 
 	var currentGeneration int
 	var currentGenerationTimestamp int64
@@ -175,34 +174,41 @@ func collectNixOSInfo() (*nixOSInfo, error) {
 	for _, generation := range generations {
 		linkPath := fmt.Sprintf("%s/system-%d-link", profilesDir, generation)
 
-		targetPath, err := filepath.EvalSymlinks(linkPath)
+		linkInfo, err := os.Stat(linkPath)
 		if err != nil {
-			log.Printf("Failed to resolve NixOS generation link %s: %v", linkPath, err)
+			log.Printf("Failed to stat NixOS generation link %s: %v", linkPath, err)
 			continue
 		}
 
-		if targetPath != currentPath {
+		if !os.SameFile(currentInfo, linkInfo) {
 			continue
 		}
 
-		linkInfo, err := os.Lstat(linkPath)
+		linkSymlinkInfo, err := os.Lstat(linkPath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to stat current NixOS generation link %s: %w", linkPath, err)
+			return nil, fmt.Errorf("failed to lstat current NixOS generation link %s: %w", linkPath, err)
 		}
 
 		currentGeneration = generation
-		currentGenerationTimestamp = linkInfo.ModTime().Unix()
+		currentGenerationTimestamp = linkSymlinkInfo.ModTime().Unix()
 		break
 	}
 
 	if currentGeneration == 0 {
-		return nil, fmt.Errorf("failed to match %s resolved path %s to a system generation link", currentSystem, currentPath)
+		return nil, fmt.Errorf("failed to match %s to a system generation link using filesystem identity", currentSystem)
 	}
 
 	systemProfileInfo, err := os.Lstat(systemProfile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to stat NixOS system profile symlink %s: %w", systemProfile, err)
 	}
+
+	log.Printf(
+		"NixOS metrics collected: generation_count=%d current_generation=%d booted_is_current=%t",
+		len(generations),
+		currentGeneration,
+		bootedIsCurrent,
+	)
 
 	return &nixOSInfo{
 		GenerationCount:            len(generations),
