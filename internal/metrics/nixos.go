@@ -204,13 +204,6 @@ func collectNixOSInfo() (*nixOSInfo, error) {
 		return nil, fmt.Errorf("failed to stat NixOS system profile symlink %s: %w", systemProfile, err)
 	}
 
-	log.Printf(
-		"NixOS system paths: current=%s booted=%s booted_is_current=%t",
-		currentPath,
-		bootedPath,
-		bootedIsCurrent,
-	)
-
 	return &nixOSInfo{
 		GenerationCount:            len(generations),
 		CurrentGeneration:          currentGeneration,
