@@ -57,7 +57,7 @@ func NewNixOSCollector() *NixOSCollector {
 		),
 		bootedCurrent: prometheus.NewDesc(
 			"nixos_system_booted_is_current",
-			"Whether the booted NixOS system resolves to the current NixOS system.",
+			"Whether /run/booted-system points to the same Nix store system as /run/current-system.",
 			nil,
 			nil,
 		),
@@ -88,35 +88,11 @@ func (c *NixOSCollector) Collect(ch chan<- prometheus.Metric) {
 		info.BootedIsCurrent,
 	)
 
-	ch <- prometheus.MustNewConstMetric(
-		c.genCount,
-		prometheus.GaugeValue,
-		float64(info.GenerationCount),
-	)
-
-	ch <- prometheus.MustNewConstMetric(
-		c.currentGen,
-		prometheus.GaugeValue,
-		float64(info.CurrentGeneration),
-	)
-
-	ch <- prometheus.MustNewConstMetric(
-		c.currentGenTime,
-		prometheus.GaugeValue,
-		float64(info.CurrentGenerationTimestamp),
-	)
-
-	ch <- prometheus.MustNewConstMetric(
-		c.lastSwitchTime,
-		prometheus.GaugeValue,
-		float64(info.LastSwitchTimestamp),
-	)
-
-	ch <- prometheus.MustNewConstMetric(
-		c.bootedCurrent,
-		prometheus.GaugeValue,
-		boolFloat(info.BootedIsCurrent),
-	)
+	ch <- prometheus.MustNewConstMetric(c.genCount, prometheus.GaugeValue, float64(info.GenerationCount))
+	ch <- prometheus.MustNewConstMetric(c.currentGen, prometheus.GaugeValue, float64(info.CurrentGeneration))
+	ch <- prometheus.MustNewConstMetric(c.currentGenTime, prometheus.GaugeValue, float64(info.CurrentGenerationTimestamp))
+	ch <- prometheus.MustNewConstMetric(c.lastSwitchTime, prometheus.GaugeValue, float64(info.LastSwitchTimestamp))
+	ch <- prometheus.MustNewConstMetric(c.bootedCurrent, prometheus.GaugeValue, boolFloat(info.BootedIsCurrent))
 }
 
 func collectNixOSInfo() (*nixOSInfo, error) {
@@ -156,17 +132,17 @@ func collectNixOSInfo() (*nixOSInfo, error) {
 
 	sort.Ints(generations)
 
-	currentInfo, err := os.Stat(currentSystem)
+	currentPath, err := readNixStoreSymlink(currentSystem)
 	if err != nil {
-		return nil, fmt.Errorf("failed to stat %s: %w", currentSystem, err)
+		return nil, err
 	}
 
-	bootedInfo, err := os.Stat(bootedSystem)
+	bootedPath, err := readNixStoreSymlink(bootedSystem)
 	if err != nil {
-		return nil, fmt.Errorf("failed to stat %s: %w", bootedSystem, err)
+		return nil, err
 	}
 
-	bootedIsCurrent := os.SameFile(currentInfo, bootedInfo)
+	bootedIsCurrent := currentPath == bootedPath
 
 	var currentGeneration int
 	var currentGenerationTimestamp int64
@@ -174,13 +150,13 @@ func collectNixOSInfo() (*nixOSInfo, error) {
 	for _, generation := range generations {
 		linkPath := fmt.Sprintf("%s/system-%d-link", profilesDir, generation)
 
-		linkInfo, err := os.Stat(linkPath)
+		targetPath, err := readNixStoreSymlink(linkPath)
 		if err != nil {
-			log.Printf("Failed to stat NixOS generation link %s: %v", linkPath, err)
+			log.Printf("Skipping NixOS generation link %s: %v", linkPath, err)
 			continue
 		}
 
-		if !os.SameFile(currentInfo, linkInfo) {
+		if targetPath != currentPath {
 			continue
 		}
 
@@ -195,18 +171,18 @@ func collectNixOSInfo() (*nixOSInfo, error) {
 	}
 
 	if currentGeneration == 0 {
-		return nil, fmt.Errorf("failed to match %s to a system generation link using filesystem identity", currentSystem)
+		return nil, fmt.Errorf("failed to match %s target %s to a system generation link", currentSystem, currentPath)
 	}
 
 	systemProfileInfo, err := os.Lstat(systemProfile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to stat NixOS system profile symlink %s: %w", systemProfile, err)
+		return nil, fmt.Errorf("failed to lstat NixOS system profile symlink %s: %w", systemProfile, err)
 	}
 
 	log.Printf(
-		"NixOS metrics collected: generation_count=%d current_generation=%d booted_is_current=%t",
-		len(generations),
-		currentGeneration,
+		"NixOS system targets: current=%s booted=%s booted_is_current=%t",
+		currentPath,
+		bootedPath,
 		bootedIsCurrent,
 	)
 
@@ -217,6 +193,19 @@ func collectNixOSInfo() (*nixOSInfo, error) {
 		LastSwitchTimestamp:         systemProfileInfo.ModTime().Unix(),
 		BootedIsCurrent:            bootedIsCurrent,
 	}, nil
+}
+
+func readNixStoreSymlink(path string) (string, error) {
+	target, err := os.Readlink(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to read symlink %s: %w", path, err)
+	}
+
+	if !strings.HasPrefix(target, "/nix/store/") {
+		return "", fmt.Errorf("symlink %s target is not a Nix store path: %s", path, target)
+	}
+
+	return target, nil
 }
 
 func boolFloat(v bool) float64 {
