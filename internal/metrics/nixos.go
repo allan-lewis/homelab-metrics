@@ -17,14 +17,21 @@ type NixOSCollector struct {
 	currentGenTime *prometheus.Desc
 	lastSwitchTime *prometheus.Desc
 	bootedCurrent  *prometheus.Desc
+	info           *prometheus.Desc
 }
 
 type nixOSInfo struct {
 	GenerationCount            int
 	CurrentGeneration          int
+	LatestGeneration           int
+	BootedGeneration           int
 	CurrentGenerationTimestamp int64
 	LastSwitchTimestamp         int64
 	BootedIsCurrent            bool
+	CurrentSystem              string
+	BootedSystem               string
+	CurrentVersion             string
+	BootedVersion              string
 }
 
 func NewNixOSCollector() *NixOSCollector {
@@ -61,6 +68,18 @@ func NewNixOSCollector() *NixOSCollector {
 			nil,
 			nil,
 		),
+		info: prometheus.NewDesc(
+			"nixos_system_info",
+			"NixOS system information. Value is always 1; details are exposed as labels.",
+			[]string{
+				"current_system",
+				"booted_system",
+				"current_version",
+				"booted_version",
+				"booted_is_current",
+			},
+			nil,
+		),
 	}
 }
 
@@ -70,6 +89,7 @@ func (c *NixOSCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.currentGenTime
 	ch <- c.lastSwitchTime
 	ch <- c.bootedCurrent
+	ch <- c.info
 }
 
 func (c *NixOSCollector) Collect(ch chan<- prometheus.Metric) {
@@ -80,12 +100,18 @@ func (c *NixOSCollector) Collect(ch chan<- prometheus.Metric) {
 	}
 
 	log.Printf(
-		"NixOS metrics collected: generation_count=%d current_generation=%d current_generation_timestamp=%d last_switch_timestamp=%d booted_is_current=%t",
+		"NixOS metrics collected: generation_count=%d current_generation=%d latest_generation=%d booted_generation=%d current_generation_timestamp=%d last_switch_timestamp=%d booted_is_current=%t current_system=%s booted_system=%s current_version=%s booted_version=%s",
 		info.GenerationCount,
 		info.CurrentGeneration,
+		info.LatestGeneration,
+		info.BootedGeneration,
 		info.CurrentGenerationTimestamp,
 		info.LastSwitchTimestamp,
 		info.BootedIsCurrent,
+		info.CurrentSystem,
+		info.BootedSystem,
+		info.CurrentVersion,
+		info.BootedVersion,
 	)
 
 	ch <- prometheus.MustNewConstMetric(c.genCount, prometheus.GaugeValue, float64(info.GenerationCount))
@@ -93,6 +119,17 @@ func (c *NixOSCollector) Collect(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(c.currentGenTime, prometheus.GaugeValue, float64(info.CurrentGenerationTimestamp))
 	ch <- prometheus.MustNewConstMetric(c.lastSwitchTime, prometheus.GaugeValue, float64(info.LastSwitchTimestamp))
 	ch <- prometheus.MustNewConstMetric(c.bootedCurrent, prometheus.GaugeValue, boolFloat(info.BootedIsCurrent))
+
+	ch <- prometheus.MustNewConstMetric(
+		c.info,
+		prometheus.GaugeValue,
+		1,
+		info.CurrentSystem,
+		info.BootedSystem,
+		info.CurrentVersion,
+		info.BootedVersion,
+		strconv.FormatBool(info.BootedIsCurrent),
+	)
 }
 
 func collectNixOSInfo() (*nixOSInfo, error) {
@@ -131,6 +168,7 @@ func collectNixOSInfo() (*nixOSInfo, error) {
 	}
 
 	sort.Ints(generations)
+	latestGeneration := generations[len(generations)-1]
 
 	currentPath, err := readNixStoreSymlink(currentSystem)
 	if err != nil {
@@ -145,6 +183,7 @@ func collectNixOSInfo() (*nixOSInfo, error) {
 	bootedIsCurrent := currentPath == bootedPath
 
 	var currentGeneration int
+	var bootedGeneration int
 	var currentGenerationTimestamp int64
 
 	for _, generation := range generations {
@@ -154,6 +193,10 @@ func collectNixOSInfo() (*nixOSInfo, error) {
 		if err != nil {
 			log.Printf("Skipping NixOS generation link %s: %v", linkPath, err)
 			continue
+		}
+
+		if targetPath == bootedPath {
+			bootedGeneration = generation
 		}
 
 		if targetPath != currentPath {
@@ -167,11 +210,14 @@ func collectNixOSInfo() (*nixOSInfo, error) {
 
 		currentGeneration = generation
 		currentGenerationTimestamp = linkSymlinkInfo.ModTime().Unix()
-		break
 	}
 
 	if currentGeneration == 0 {
 		return nil, fmt.Errorf("failed to match %s target %s to a system generation link", currentSystem, currentPath)
+	}
+
+	if bootedGeneration == 0 {
+		return nil, fmt.Errorf("failed to match %s target %s to a system generation link", bootedSystem, bootedPath)
 	}
 
 	systemProfileInfo, err := os.Lstat(systemProfile)
@@ -189,9 +235,15 @@ func collectNixOSInfo() (*nixOSInfo, error) {
 	return &nixOSInfo{
 		GenerationCount:            len(generations),
 		CurrentGeneration:          currentGeneration,
+		LatestGeneration:           latestGeneration,
+		BootedGeneration:           bootedGeneration,
 		CurrentGenerationTimestamp: currentGenerationTimestamp,
 		LastSwitchTimestamp:         systemProfileInfo.ModTime().Unix(),
 		BootedIsCurrent:            bootedIsCurrent,
+		CurrentSystem:              nixOSSystemName(currentPath),
+		BootedSystem:               nixOSSystemName(bootedPath),
+		CurrentVersion:             nixOSVersion(currentPath),
+		BootedVersion:              nixOSVersion(bootedPath),
 	}, nil
 }
 
@@ -206,6 +258,38 @@ func readNixStoreSymlink(path string) (string, error) {
 	}
 
 	return target, nil
+}
+
+func nixOSSystemName(path string) string {
+	if idx := strings.LastIndex(path, "/"); idx >= 0 {
+		return path[idx+1:]
+	}
+
+	return path
+}
+
+func nixOSVersion(path string) string {
+	base := nixOSSystemName(path)
+
+	const marker = "-nixos-system-"
+	idx := strings.Index(base, marker)
+	if idx < 0 {
+		return "unknown"
+	}
+
+	raw := base[idx+len(marker):]
+	parts := strings.Split(raw, "-")
+
+	if len(parts) < 2 {
+		return "unknown"
+	}
+
+	versionParts := strings.Split(parts[1], ".")
+	if len(versionParts) < 2 {
+		return "unknown"
+	}
+
+	return versionParts[0] + "." + versionParts[1]
 }
 
 func boolFloat(v bool) float64 {
