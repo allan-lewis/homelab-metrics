@@ -72,11 +72,13 @@ func NewNixOSCollector() *NixOSCollector {
 			"nixos_system_info",
 			"NixOS system information. Value is always 1; details are exposed as labels.",
 			[]string{
-				"current_system",
-				"booted_system",
-				"current_version",
-				"booted_version",
-				"booted_is_current",
+					"current_system",
+					"booted_system",
+					"current_generation",
+					"booted_generation",
+					"current_version",
+					"booted_version",
+					"booted_is_current",
 			},
 			nil,
 		),
@@ -121,14 +123,16 @@ func (c *NixOSCollector) Collect(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(c.bootedCurrent, prometheus.GaugeValue, boolFloat(info.BootedIsCurrent))
 
 	ch <- prometheus.MustNewConstMetric(
-		c.info,
-		prometheus.GaugeValue,
-		1,
-		info.CurrentSystem,
-		info.BootedSystem,
-		info.CurrentVersion,
-		info.BootedVersion,
-		strconv.FormatBool(info.BootedIsCurrent),
+			c.info,
+			prometheus.GaugeValue,
+			1,
+			info.CurrentSystem,
+			info.BootedSystem,
+			strconv.Itoa(info.CurrentGeneration),
+			strconv.Itoa(info.BootedGeneration),
+			info.CurrentVersion,
+			info.BootedVersion,
+			strconv.FormatBool(info.BootedIsCurrent),
 	)
 }
 
